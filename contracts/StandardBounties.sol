@@ -10,7 +10,6 @@ contract ERC20Interface {
     function transferFrom(address from, address to, uint tokens) public returns (bool success);
 }
 
-
 /// @title StandardBounties
 /// @dev Used to pay out individuals or groups for task fulfillment through
 /// stepwise work submission, acceptance, and payment
@@ -20,6 +19,9 @@ contract StandardBounties {
   /*
    * Events
    */
+   
+   
+  // Bounty Events
   event BountyIssued(uint bountyId);
   event BountyActivated(uint bountyId, address issuer);
   event BountyFulfilled(uint bountyId, address indexed fulfiller, uint256 indexed _fulfillmentId);
@@ -53,6 +55,10 @@ contract StandardBounties {
   mapping(uint=>HumanStandardToken) tokenContracts;
   
   mapping(address=>UserStats) userStats;
+    
+  ERC20Interface distributionToken;
+  mapping (uint => Royalty) royalties;
+  mapping (address => address) forwarderAddresses;
 
   /*
    * Enums
@@ -91,11 +97,7 @@ contract StandardBounties {
       uint royaltiesWon;
   }
   
- /*
-  * RoyaltyStructs
-  */
-
-    struct Royalty {
+  struct Royalty {
 		uint bountyId;
 		uint initialFunding;
 		uint balance;
@@ -107,15 +109,6 @@ contract StandardBounties {
 		uint foundingTime;
 		uint totalWeight;
     }
-    
-    uint distributionPercent;
-    ERC20Interface distributionToken;
-
-	// map bountyId -> royalty.
-    mapping (uint => Royalty) royalties;
-    
-    // Beneficiaries can choose to donate their proceeds to another organization.
-    mapping (address => address) forwarderAddresses;
 
   /*
    * Modifiers
@@ -492,12 +485,18 @@ contract StandardBounties {
 		emit OwnerAdded(_bountyId, _newOwner, _weight);
 	}
 
-	// Transfer your weight of a given bounty to another party.
+	/// @dev setRoyaltiesForwardingAddress(): Tokens for a given bounty & user are automatically redirected to another address
+    /// @param _bountyId the index of the corresponding bounty
+    /// @param _forwardingAddress the address that will recieve the tokens
 	function setRoyaltiesForwardingAddress(uint _bountyId, address _forwardingAddress) public {
 		require (royalties[_bountyId].ownerIndicies[msg.sender] != 0, "Sender is not an owner of royalty");
 		royalties[_bountyId].forwarderAddresses[msg.sender] = _forwardingAddress;
 	}
 
+    /// @dev fundRoyalty(): Init royalty pool for a given bounty
+    /// @param _bountyId the index of the corresponding bounty
+    /// @param _value the initial funding for the royalty pool
+    /// @return boolean success or failure
 	function fundRoyalty(uint _bountyId, uint _value) public payable returns (bool) {
 	    royalties[_bountyId].initialFunding = msg.value;
 		royalties[_bountyId].balance = msg.value;
@@ -506,6 +505,8 @@ contract StandardBounties {
 		return true;
 	}
 
+    /// @dev distributeRoyaltyFundsSimple(): Distribute tokens for a period for a given royalty pool
+    /// @param _bountyId the index of the corresponding bounty
 	function distributeRoyaltyFundsSimple(uint _bountyId) {
 	    uint _dist = 100;
 	    
@@ -518,19 +519,22 @@ contract StandardBounties {
 	    }
 	}
 	
+	/// @dev getRoyaltyOwnerCount(): Count of beneficiaries in a royalty ppol
+    /// @param _bountyId the index of the corresponding bounty
+    /// @param _index Unused param, will remove
 	function getRoyaltyOwnerCount(uint _bountyId, uint _index) public view returns (uint) {
 	    return royalties[_bountyId].owners.length;
 	}
 	
     /// @dev getRoyaltyBeneficiary() get royalty beneficiary by index
     /// @param _bountyId the index of the corresponding bounty
-    /// @return Returns the beneficiarys' key information
+    /// @return tuple of beneficiary information
 	function getRoyaltyBeneficiary(uint _bountyId, uint _index) public view returns (address, uint) {
 	    address _owner = royalties[_bountyId].owners[_index];
 	    return (_owner, royalties[_bountyId].ownerWeights[_owner]);
 	}
 	
-  /// @dev getRoyaltyFinances() shows transparent financial information about a royalty
+  /// @dev getRoyaltyFinances() shows financial information about a royalty
   /// @param _bountyId the index of the corresponding bounty
   /// @return Returns the initial funding, current balance, and distribution data
   function getRoyaltyFinances(uint _bountyId)
@@ -544,16 +548,25 @@ contract StandardBounties {
   
   // User Stats
   
+  /// @dev increaseRoyaltiesWon() utility to tally royalties earned by a user
+  /// @param _user ethereum address of user
+  /// @param _value amount to record
   function increaseRoyaltiesWon(address _user, uint _value) internal {
        require(userStats[_user].royaltiesWon + _value > userStats[_user].royaltiesWon);
        userStats[_user].royaltiesWon += _value;
    }
    
+  /// @dev increaseBountiesWon() utility to tally bounty earned by a user
+  /// @param _user ethereum address of user
+  /// @param _value amount to record
    function increaseBountiesWon(address _user, uint _value) internal {
        require(userStats[_user].bountiesWon + _value > userStats[_user].bountiesWon);
        userStats[_user].bountiesWon += _value;
    }
    
+   /// @dev getUserStats() get earning stats of a user
+   /// @param _user ethereum address of user
+   /// @return tuple of user earnings stats
    function getUserStats(address _user) public view returns (uint, uint) {
        return (userStats[_user].bountiesWon, userStats[_user].royaltiesWon);
    }
