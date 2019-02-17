@@ -32,7 +32,7 @@ contract StandardBounties {
   event BountyChanged(uint bountyId);
   event IssuerTransferred(uint _bountyId, address indexed _newIssuer);
   event PayoutIncreased(uint _bountyId, uint _newFulfillmentAmount);
-
+  
   // Royalty Events
   event RoyaltyFunded(uint indexed bountyId, uint indexed value);
   event RoyaltyExhausted(uint indexed bountyId);
@@ -51,7 +51,7 @@ contract StandardBounties {
   mapping(uint=>Fulfillment[]) fulfillments;
   mapping(uint=>uint) numAccepted;
   mapping(uint=>HumanStandardToken) tokenContracts;
-
+  
   mapping(address=>UserStats) userStats;
 
   /*
@@ -85,12 +85,12 @@ contract StandardBounties {
       address fulfiller;
       string data;
   }
-
+  
   struct UserStats {
       uint bountiesWon;
       uint royaltiesWon;
   }
-
+  
  /*
   * RoyaltyStructs
   */
@@ -107,13 +107,13 @@ contract StandardBounties {
 		uint foundingTime;
 		uint totalWeight;
     }
-
+    
     uint distributionPercent;
     ERC20Interface distributionToken;
 
 	// map bountyId -> royalty.
     mapping (uint => Royalty) royalties;
-
+    
     // Beneficiaries can choose to donate their proceeds to another organization.
     mapping (address => address) forwarderAddresses;
 
@@ -130,7 +130,7 @@ contract StandardBounties {
     require((fulfillments[_bountyId].length + 1) > fulfillments[_bountyId].length);
     _;
   }
-
+  
   modifier validateBountyArrayIndex(uint _bountyId){
     require(_bountyId < bounties.length);
     _;
@@ -145,7 +145,7 @@ contract StandardBounties {
       require(msg.sender == fulfillments[_bountyId][_fulfillmentId].fulfiller);
       _;
   }
-
+  
   modifier onlyOwner() {
       require(msg.sender == owner);
       _;
@@ -283,7 +283,7 @@ contract StandardBounties {
       require(_value == bounties[_bountyId].fulfillmentAmount * 2, "Not exact value");
       bounties[_bountyId].balance += _value;
       fundRoyalty(_bountyId, _value);
-
+      
       require (bounties[_bountyId].balance >= bounties[_bountyId].fulfillmentAmount, "Not enough funds to activate");
       transitionToState(_bountyId, BountyStages.Active);
 
@@ -301,17 +301,14 @@ contract StandardBounties {
   /// @param _data the data artifacts representing the fulfillment of the bounty
   function fulfillBounty(uint _bountyId, string _data)
       public
-      validateBountyArrayIndex(_bountyId)
-      validateNotTooManyFulfillments(_bountyId)
       isAtStage(_bountyId, BountyStages.Active)
       isBeforeDeadline(_bountyId)
-      notIssuerOrArbiter(_bountyId)
       returns (uint)
   {
       fulfillments[_bountyId].push(Fulfillment(false, msg.sender, _data));
 
       BountyFulfilled(_bountyId, msg.sender, (fulfillments[_bountyId].length - 1));
-
+      
       return fulfillments[_bountyId].length - 1;
   }
 
@@ -345,7 +342,7 @@ contract StandardBounties {
       require(bounties[_bountyId].balance >= bounties[_bountyId].fulfillmentAmount);
       _;
   }
-
+  
   /// @dev acceptFulfillmentPartial(): accept a given fulfillment, but only distribute part of reward
   /// @param _bountyId the index of the bounty
   /// @param _fulfillmentId the index of the fulfillment being accepted
@@ -356,32 +353,24 @@ contract StandardBounties {
       isAtStage(_bountyId, BountyStages.Active)
       enoughFundsToPay(_bountyId)
   {
+      //TODO: Add math safety
       require(bounties[_bountyId].fulfillmentDistributed + _percentage <= 100, "Not enough distrbution remaining");
 
       fulfillments[_bountyId][_fulfillmentId].accepted = true;
-
-      require(bounties[_bountyId].fulfillmentDistributed + _percentage > bounties[_bountyId].fulfillmentDistributed);
       bounties[_bountyId].fulfillmentDistributed += _percentage;
-
       numAccepted[_bountyId]++;
-
-      //TODO: Add math safety
-
+      
       uint fulfillmentAmount = (bounties[_bountyId].fulfillmentAmount / 100 * _percentage);
-
       increaseBountiesWon(fulfillments[_bountyId][_fulfillmentId].fulfiller, fulfillmentAmount);
-
-      require(bounties[_bountyId].balance - fulfillmentAmount < bounties[_bountyId].balance);
       bounties[_bountyId].balance -= fulfillmentAmount;
-
       addRoyaltyBeneficiary(_bountyId, fulfillments[_bountyId][_fulfillmentId].fulfiller, _percentage);
-
+      
       if (bounties[_bountyId].paysTokens){
         require(tokenContracts[_bountyId].transfer(fulfillments[_bountyId][_fulfillmentId].fulfiller, fulfillmentAmount));
       } else {
         fulfillments[_bountyId][_fulfillmentId].fulfiller.transfer(fulfillmentAmount);
       }
-
+      
       FulfillmentAcceptedPartial(_bountyId, msg.sender, _fulfillmentId, _percentage);
   }
 
@@ -390,67 +379,9 @@ contract StandardBounties {
       _;
   }
 
-  /// @dev changeData(): allows the issuer to change a bounty's data
-  /// @param _bountyId the index of the bounty
-  /// @param _newData the new requirements of the bounty
-  function changeBountyData(uint _bountyId, string _newData)
-      public
-      validateBountyArrayIndex(_bountyId)
-      onlyIssuer(_bountyId)
-      isAtStage(_bountyId, BountyStages.Draft)
-  {
-      bounties[_bountyId].data = _newData;
-      BountyChanged(_bountyId);
-  }
-
-  /// @dev changeBountyfulfillmentAmount(): allows the issuer to change a bounty's fulfillment amount
-  /// @param _bountyId the index of the bounty
-  /// @param _newFulfillmentAmount the new fulfillment amount
-  function changeBountyFulfillmentAmount(uint _bountyId, uint _newFulfillmentAmount)
-      public
-      validateBountyArrayIndex(_bountyId)
-      onlyIssuer(_bountyId)
-      isAtStage(_bountyId, BountyStages.Draft)
-  {
-      bounties[_bountyId].fulfillmentAmount = _newFulfillmentAmount;
-      BountyChanged(_bountyId);
-  }
-
-  /// @dev changeBountyArbiter(): allows the issuer to change a bounty's arbiter
-  /// @param _bountyId the index of the bounty
-  /// @param _newArbiter the new address of the arbiter
-  function changeBountyArbiter(uint _bountyId, address _newArbiter)
-      public
-      validateBountyArrayIndex(_bountyId)
-      onlyIssuer(_bountyId)
-      isAtStage(_bountyId, BountyStages.Draft)
-  {
-      bounties[_bountyId].arbiter = _newArbiter;
-      BountyChanged(_bountyId);
-  }
-
   modifier newFulfillmentAmountIsIncrease(uint _bountyId, uint _newFulfillmentAmount) {
       require(bounties[_bountyId].fulfillmentAmount < _newFulfillmentAmount);
       _;
-  }
-
-  /// @dev increasePayout(): allows the issuer to increase a given fulfillment
-  /// amount in the active stage
-  /// @param _bountyId the index of the bounty
-  /// @param _newFulfillmentAmount the new fulfillment amount
-  /// @param _value the value of the additional deposit being added
-  function increasePayout(uint _bountyId, uint _newFulfillmentAmount, uint _value)
-      public
-      payable
-      validateBountyArrayIndex(_bountyId)
-      onlyIssuer(_bountyId)
-      newFulfillmentAmountIsIncrease(_bountyId, _newFulfillmentAmount)
-      transferredAmountEqualsValue(_bountyId, _value)
-  {
-      bounties[_bountyId].balance += _value;
-      require(bounties[_bountyId].balance >= _newFulfillmentAmount);
-      bounties[_bountyId].fulfillmentAmount = _newFulfillmentAmount;
-      PayoutIncreased(_bountyId, _newFulfillmentAmount);
   }
 
   /// @dev getFulfillment(): Returns the fulfillment at a given index
@@ -543,13 +474,21 @@ contract StandardBounties {
   {
       return fulfillments[_bountyId].length;
   }
-
-  // Royalties
+  
+  // Royalties 
+  
+  /// @dev addRoyaltyBeneficiary() adds a beneficiary to an existing royalty
+  /// @param _bountyId the index of the corresponding bounty
+  /// @return Returns the number of fulfillments
   function addRoyaltyBeneficiary(uint _bountyId, address _newOwner, uint _weight) public {
-		royalties[_bountyId].owners.push(_newOwner);
-		royalties[_bountyId].ownerIndicies[_newOwner] = royalties[_bountyId].owners.length - 1;
+      if (royalties[_bountyId].ownerIndicies[_newOwner] == 0) {
+        royalties[_bountyId].owners.push(_newOwner);
+		royalties[_bountyId].ownerIndicies[_newOwner] = royalties[_bountyId].owners.length - 1;  
+      }
+		
 		royalties[_bountyId].ownerWeights[_newOwner] += _weight;
-
+		royalties[_bountyId].totalWeight += _weight;
+		
 		emit OwnerAdded(_bountyId, _newOwner, _weight);
 	}
 
@@ -559,7 +498,6 @@ contract StandardBounties {
 		royalties[_bountyId].forwarderAddresses[msg.sender] = _forwardingAddress;
 	}
 
-	/// @param _bountyId a
 	function fundRoyalty(uint _bountyId, uint _value) public payable returns (bool) {
 	    royalties[_bountyId].initialFunding = msg.value;
 		royalties[_bountyId].balance = msg.value;
@@ -568,36 +506,33 @@ contract StandardBounties {
 		return true;
 	}
 
-	function getRoyaltyDailyDistribution(uint _bountyId) external view returns (uint) {
-	    return (royalties[_bountyId].initialFunding / 100) * royalties[_bountyId].distributionPercent;
-	}
+	function distributeRoyaltyFundsSimple(uint _bountyId) {
+	    uint _dist = 100;
+	    
+	    for (uint i = 0; i < royalties[_bountyId].owners.length; i++) {
+	        address _owner = royalties[_bountyId].owners[i];
 
-	function distributeRoyaltyFunds(uint[] _bountyIds, uint[] _values, address[] _payees) public {
-		for (uint i = 0; i < _bountyIds.length; i++) {
-			require(distributionToken.transfer(_payees[i], _values[i]));
-			emit PayoutGenerated(_bountyIds[i] ,_payees[i], _values[i]);
-		}
+	        require(distributionToken.transfer(royalties[_bountyId].owners[i], _dist));
+	        increaseRoyaltiesWon(_owner, _dist);
+			emit PayoutGenerated(_bountyId ,_owner, _dist);
+	    }
 	}
-
+	
 	function getRoyaltyOwnerCount(uint _bountyId, uint _index) public view returns (uint) {
 	    return royalties[_bountyId].owners.length;
 	}
-
-	function getRoyaltyOwner(uint _bountyId, uint _index) public view returns (address, uint) {
+	
+    /// @dev getRoyaltyBeneficiary() get royalty beneficiary by index
+    /// @param _bountyId the index of the corresponding bounty
+    /// @return Returns the beneficiarys' key information
+	function getRoyaltyBeneficiary(uint _bountyId, uint _index) public view returns (address, uint) {
 	    address _owner = royalties[_bountyId].owners[_index];
 	    return (_owner, royalties[_bountyId].ownerWeights[_owner]);
 	}
-
-	function getRoyaltyOwners(uint _bountyId) public view returns (address[], uint[]) {
-	    address[] memory addresses = new address[](royalties[_bountyId].owners.length);
-	    uint[] memory weights = new uint[](royalties[_bountyId].owners.length);
-
-	    for (uint i = 0; i < royalties[_bountyId].owners.length; i++) {
-	        addresses[i] = royalties[_bountyId].owners[i];
-	        weights[i] = royalties[_bountyId].ownerWeights[royalties[_bountyId].owners[i]];
-	    }
-	}
-
+	
+  /// @dev getRoyaltyFinances() shows transparent financial information about a royalty
+  /// @param _bountyId the index of the corresponding bounty
+  /// @return Returns the initial funding, current balance, and distribution data
   function getRoyaltyFinances(uint _bountyId)
       public
       constant
@@ -606,27 +541,27 @@ contract StandardBounties {
   {
       return (royalties[_bountyId].initialFunding, royalties[_bountyId].balance, royalties[_bountyId].distributionPercent);
   }
-
+  
   // User Stats
-
+  
   function increaseRoyaltiesWon(address _user, uint _value) internal {
        require(userStats[_user].royaltiesWon + _value > userStats[_user].royaltiesWon);
        userStats[_user].royaltiesWon += _value;
    }
-
+   
    function increaseBountiesWon(address _user, uint _value) internal {
        require(userStats[_user].bountiesWon + _value > userStats[_user].bountiesWon);
        userStats[_user].bountiesWon += _value;
    }
-
+   
    function getUserStats(address _user) public view returns (uint, uint) {
        return (userStats[_user].bountiesWon, userStats[_user].royaltiesWon);
    }
-
+  
   /*
    * Internal functions
    */
-
+   
   /// @dev transitionToState(): transitions the contract to the
   /// state passed in the parameter `_newStage` given the
   /// conditions stated in the body of the function
